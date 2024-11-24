@@ -28,6 +28,8 @@ jobs:
 
       - name: Log Issue Parser
         run: |
+          echo '${{ steps.issue-parser.outputs.issueparser_parentKey }}'
+          echo '${{ steps.issue-parser.outputs.__ticket_number }}'
           echo '${{ steps.issue-parser.outputs.jsonString }}'
 
       - name: Convert markdown to Jira Syntax
@@ -47,8 +49,8 @@ jobs:
         with:
           project: UP
           issuetype: Task
-          summary: "${{ github.event.issue.title }}"
-          description: "${{ steps.md2jira.outputs.output-text }}"
+          summary: '${{ github.event.issue.title }}'
+          description: '${{ steps.md2jira.outputs.output-text }}'
           fields: |
             {
               "parent": {
@@ -62,16 +64,28 @@ jobs:
       - name: Checkout develop code
         uses: actions/checkout@v4
         with:
-          ref: Develop
+          ref: develop
 
       - name: Create branch with Ticket number
         run: |
-          git checkout -b ${{ steps.create.outputs.issue }}
-          git push origin ${{ steps.create.outputs.issue }}
+          ISSUE_NUMBER="${{ steps.create.outputs.issue }}"
+          ISSUE_TITLE="${{ steps.issue-parser.outputs.issueparser_branch}}"
+          BRANCH_NAME="${ISSUE_NUMBER}-$(echo ${ISSUE_TITLE} | sed 's/ /-/g')"
+          git checkout -b "${BRANCH_NAME}"
+          git push origin "${BRANCH_NAME}"
 
       - name: Update issue title
         uses: actions-cool/issues-helper@v3
         with:
-          actions: "update-issue"
+          actions: 'update-issue'
           token: ${{ secrets.GITHUB_TOKEN }}
-          title: "${{ steps.create.outputs.issue }} ${{ github.event.issue.title }}"
+          title: '[${{ steps.create.outputs.issue }}] ${{ github.event.issue.title }}'
+
+      - name: Add comment with Jira issue link
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body: 'Jira Issue Created: [${{ steps.create.outputs.issue }}](${{ secrets.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }})'
+      
