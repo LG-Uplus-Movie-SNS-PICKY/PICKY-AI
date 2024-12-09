@@ -1,12 +1,13 @@
-from fastapi import FastAPI
-from app.recommender import recommend
+from fastapi import FastAPI, Depends
+from app.database import get_db
 
 app = FastAPI()
 
+# 엔드포인트 정의
 @app.get("/")
-def read_root():
+def root_endpoint():
     return {"message": "Welcome to the Recommender System!"}
 
-@app.post("/recommend/")
-async def get_recommendation(user_id: int, movie_id: int, occupation: int):
-    return recommend(user_id, movie_id, occupation)
+@app.get("/check-db")
+def check_database(db=Depends(get_db)):
+    return {"message": "Database connection successful!"}
