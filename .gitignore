@@ -1,1 +1,4 @@
+model/recommender_model/metadata.pkl
+model/recommender_model/saved_model.keras
 config/db_config.json
+env
