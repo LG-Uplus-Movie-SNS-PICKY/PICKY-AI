@@ -1,8 +1,12 @@
 import tensorflow as tf
 import pickle
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-from app.database import fetch_movie_details
+import logging
+from app.database import fetch_movie_details, fetch_all_users, save_user_recommendations
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def RMSE(y_true, y_pred):
     return tf.sqrt(tf.reduce_mean(tf.square(y_true - y_pred)))
@@ -41,16 +45,9 @@ if movie_embedding_weights is None:
     raise ValueError("영화 임베딩 가중치를 로드할 수 없습니다.")
 
 # ========== 함수 정의 ==========
-
 def get_user_vector(user_ratings, movie_embeddings, tmdb_to_idx):
-    """
-    사용자 평점을 기반으로 사용자 벡터를 생성합니다.
-    user_ratings: {tmdb_id: rating} 형태의 딕셔너리
-    movie_embeddings: (num_movies+1, embedding_dim)
-    tmdb_to_idx: {tmdb_id: embedding_index} 매핑 딕셔너리
-    """
     if not user_ratings:
-        # 평점이 없는 신규 사용자 처리 로직
+        # 신규 사용자 또는 평가 데이터가 없는 사용자 처리
         embedding_dim = movie_embeddings.shape[1]
         return np.zeros(embedding_dim, dtype=np.float32)
 
@@ -66,46 +63,79 @@ def get_user_vector(user_ratings, movie_embeddings, tmdb_to_idx):
 
     if total_weight > 0:
         user_vector /= total_weight
+    else:
+        # 평가 데이터는 있지만 매핑이 안 된 경우
+        user_vector = np.zeros(embedding_dim, dtype=np.float32)
+
     return user_vector
 
+
+def calculate_similarities(user_vector, movie_embeddings):
+    user_norm = np.linalg.norm(user_vector)
+    if user_norm == 0:
+        raise ValueError("사용자 벡터의 길이가 0입니다. 벡터가 올바르게 생성되었는지 확인하세요.")
+
+    movie_norms = np.linalg.norm(movie_embeddings, axis=1)
+    non_zero_mask = movie_norms != 0
+
+    similarities = np.zeros(movie_embeddings.shape[0])
+    valid_movie_embeddings = movie_embeddings[non_zero_mask]
+    similarities[non_zero_mask] = np.dot(valid_movie_embeddings, user_vector) / (
+        movie_norms[non_zero_mask] * user_norm
+    )
+
+    return similarities
+
 def recommend_movies(user_vector, movie_embeddings, idx_to_tmdb, user_ratings=None, top_k=10):
-    """
-    사용자 벡터와 영화 임베딩을 기반으로 영화를 추천합니다.
-    user_vector: 사용자 벡터
-    movie_embeddings: 영화 임베딩 배열
-    idx_to_tmdb: {embedding_index: tmdb_id} 매핑 딕셔너리
-    user_ratiㄹgs: 사용자가 이미 평가한 영화 (선택사항)
-    top_k: 추천할 영화 수
-    """
-    similarities = cosine_similarity([user_vector], movie_embeddings)[0]
+    similarities = calculate_similarities(user_vector, movie_embeddings)
     top_indices = np.argsort(-similarities)
 
-    recommended_tmdb_ids = []
+    recommended_movies = []
     for idx in top_indices:
         if idx in idx_to_tmdb:
             tmdb_id = idx_to_tmdb[idx]
             if user_ratings is None or tmdb_id not in user_ratings:
-                recommended_tmdb_ids.append(tmdb_id)
-                print(f"추천 ID 추가: {tmdb_id} (유사도: {similarities[idx]:.4f})")
-                if len(recommended_tmdb_ids) == top_k:
+                recommended_movies.append({
+                    "movie_id": int(tmdb_id),  # np.int64를 int로 변환
+                    "similarity": float(similarities[idx])  # similarity 값 포함
+                })
+                if len(recommended_movies) == top_k:
                     break
-    print(f"최종 추천 리스트: {recommended_tmdb_ids}")
-    return recommended_tmdb_ids
 
-def get_movie_details(tmdb_ids, db):
-    tmdb_ids = [int(id) for id in tmdb_ids]  # Ensure all IDs are integers
-    """
-    TMDb ID를 기반으로 영화 세부 정보를 가져옵니다.
-    tmdb_ids: TMDb ID 리스트
-    db: 데이터베이스 연결 객체
-    """
-    if not tmdb_ids:
-        return []
+    if not recommended_movies:
+        print("No recommendations generated.")
+
+    return recommended_movies
+
+
+
+def generate_user_recommendation(user, movie_embeddings, tmdb_to_idx, idx_to_tmdb, top_k=10):
+    user_vector = get_user_vector(user["ratings"], movie_embeddings, tmdb_to_idx)
+    recommended_tmdb_ids = recommend_movies(user_vector, movie_embeddings, idx_to_tmdb, user["ratings"], top_k)
+    return {"user_id": user["user_id"], "recommended_movies": recommended_tmdb_ids}
+
+def generate_and_store_recommendations(movie_embeddings, tmdb_to_idx, idx_to_tmdb, db, top_k=10):
     try:
-        movie_details = fetch_movie_details(tmdb_ids, db)
-        if not movie_details:
-            print(f"No details found for TMDb IDs: {tmdb_ids}")
-        return movie_details
+        users = fetch_all_users(db)
     except Exception as e:
-        print(f"Error fetching movie details: {e}")
-        return []
+        print(f"Error fetching users: {e}")
+        return
+
+    all_recommendations = []
+    for user in users:
+        try:
+            recommendation = generate_user_recommendation(user, movie_embeddings, tmdb_to_idx, idx_to_tmdb, top_k)
+            all_recommendations.append(recommendation)
+        except Exception as e:
+            print(f"Error generating recommendation for user {user['user_id']}: {e}")
+
+    try:
+        save_user_recommendations(all_recommendations, db)
+        print(f"{len(users)}명의 사용자 추천 결과를 저장했습니다.")
+    except Exception as e:
+        print(f"Error saving recommendations: {e}")
+
+    # 추천 결과를 출력
+    for rec in all_recommendations:
+        print(f"User {rec['user_id']} recommendations: {rec['recommended_movies']}")
+
