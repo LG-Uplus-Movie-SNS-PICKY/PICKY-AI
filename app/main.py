@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.database import get_db, fetch_user_ratings
-from app.recommender import generate_and_store_recommendations, get_user_vector, recommend_movies, movie_embedding_weights, tmdb_to_idx, idx_to_tmdb
+from app.recommender import generate_and_store_recommendations, get_user_vector, recommend_movies, movie_embedding_weights, tmdb2idx, idx_to_tmdb
 from app.schemas import UserRatings
 
 app = FastAPI()
@@ -24,7 +24,7 @@ def check_database(db=Depends(get_db)):
 @app.post("/recommendations/all")
 def generate_all_recommendations(db: Session = Depends(get_db)):
     try:
-        generate_and_store_recommendations(movie_embedding_weights, tmdb_to_idx, idx_to_tmdb, db, top_k=30)
+        generate_and_store_recommendations(movie_embedding_weights, tmdb2idx, idx_to_tmdb, db, top_k=30)
         return {"message": "Recommendations generated and saved for all users."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate recommendations: {str(e)}")
