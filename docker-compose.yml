@@ -1,0 +1,27 @@
+version: '3.7'
+
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.7.0-python3.8
+  environment:
+    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=mysql+pymysql://airflow_user:airflow_password@<mysql_host>:3306/airflow_db
+    - AIRFLOW__WEBSERVER__RBAC=True
+    - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+
+services:
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow_webserver
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow_scheduler
+    command: scheduler

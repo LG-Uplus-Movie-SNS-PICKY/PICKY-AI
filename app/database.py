@@ -20,7 +20,7 @@ db_config = load_db_config()
 DATABASE_URL = f"mysql+pymysql://{db_config['username']}:{db_config['password']}@{db_config['host']}:{db_config['port']}/{db_config['db_name']}"
 
 # SQLAlchemy 세션 설정
-engine = create_engine(DATABASE_URL, echo=True)
+engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():
@@ -63,37 +63,48 @@ def fetch_user_ratings(user_id: int, db) -> Dict[int, float]:
     # 영화 ID와 평점을 딕셔너리로 반환
     return {row.movie_id: row.rating for row in result}
 
-def fetch_movie_details(tmdb_ids: List[int], db) -> List[Dict]:
+def fetch_movie_details(tmdb_ids, db):
     """
-    TMDb ID 리스트를 받아 데이터베이스에서 영화 상세 정보를 가져옵니다.
+    TMDb ID를 기반으로 영화 세부 정보를 가져옵니다.
+    tmdb_ids: TMDb ID 리스트
+    db: 데이터베이스 연결 객체
     """
+    tmdb_ids = [int(id) for id in tmdb_ids]
     if not tmdb_ids:
-        return []  # TMDb ID가 없는 경우 빈 리스트 반환
+        return []
 
-    # SQL 쿼리 작성
     query = text("""
-        SELECT id, title, poster_url
+        SELECT id, title, popularity  -- 인기도 추가
         FROM movie
         WHERE id IN :movie_ids
     """)
+    
 
-    # TMDb ID를 Python 기본 정수로 변환
-    tmdb_ids = [int(tmdb_id) for tmdb_id in tmdb_ids]
+    try:
+        result = db.execute(query, {"movie_ids": tuple(tmdb_ids)}).fetchall()
+        movie_details = []
+        for row in result:
+            movie_details.append({
+                "id": row.id,
+                "title": row.title,
+                "popularity": row.popularity,  # 인기도 추가
+            })
+        return movie_details
+    except Exception as e:
+        print(f"Error fetching movie details: {e}")
+        return []
 
-    # 쿼리 실행 및 결과 가져오기
-    result = db.execute(query, {"movie_ids": tuple(tmdb_ids)}).fetchall()
 
-    # 결과 가공
-    movie_details = []
-    for row in result:
-        movie = {
-            "id": row.id,
-            "title": row.title,
-            "poster_url": row.poster_url,
-        }
-        movie_details.append(movie)
+def fetch_user_liked_movies(user_id: int, db) -> list[int]:
 
-    return movie_details
+    query = text("""
+        SELECT movie_id
+        FROM movie_like
+        WHERE user_id = :user_id
+    """)
+    result = db.execute(query, {"user_id": user_id}).fetchall()
+    return [row.movie_id for row in result]
+
 
 def save_user_recommendations(recommendations, db):
     """
